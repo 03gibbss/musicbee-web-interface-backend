@@ -26,39 +26,62 @@ module.exports = class MusicBee extends EventEmitter {
       this.#client.write(line);
     });
 
+    this.#stream.on("error", (err) => {
+      console.log("STREAM ERROR", err);
+    });
+
     this.#client.on("data", (res) => {
-      const { context, data } = JSON.parse(res);
-      console.log({ context, data });
-      switch (context) {
-        case "player":
-          this.#sendMessage("protocol", {
-            no_broadcast: false,
-            protocol_version: 5,
-            client_id: "custom_id",
-          });
-          break;
-        case "protocol":
-          this.#init();
-          break;
-        case "playerstatus":
-          this.emit("playerstatus", data);
-          break;
-        case "playerstate":
-          this.emit("playerstate", data);
-          break;
-        case "nowplayingposition":
-          this.emit("nowplayingposition", data);
-          break;
-        case "nowplayingtrack":
-          this.emit("nowplayingtrack", data);
-          break;
-        case "playlistlist":
-          this.emit("playlistlist", data);
-          break;
-        case "playlistplay":
-          this.emit("playlistplay", data);
-          break;
-        default:
+      try {
+        const { context, data } = JSON.parse(res);
+        console.log({ context, data });
+        switch (context) {
+          case "player":
+            this.#sendMessage("protocol", {
+              no_broadcast: false,
+              protocol_version: 5,
+              client_id: "custom_id",
+            });
+            break;
+          case "protocol":
+            this.#init();
+            break;
+          case "playerstatus":
+            this.emit("playerstatus", data);
+            break;
+          case "playerstate":
+            this.emit("playerstate", data);
+            break;
+          case "nowplayingposition":
+            this.emit("nowplayingposition", data);
+            break;
+          case "nowplayingtrack":
+            this.emit("nowplayingtrack", data);
+            break;
+          case "playlistlist":
+            this.emit("playlistlist", data);
+            break;
+          case "playlistplay":
+            this.emit("playlistplay", data);
+            break;
+          case "nowplayinglist":
+            this.emit("nowplayinglist", data);
+            break;
+          case "playerstop":
+            this.emit("playerstop", data);
+            break;
+          case "playermute":
+            this.emit("playermute", data);
+            break;
+          case "playerprevious":
+            this.emit("playerprevious");
+            break;
+          case "nowplayinglistchanged":
+            this.emit("nowplayinglistchanged");
+            break;
+          default:
+        }
+      } catch (err) {
+        console.error(err);
       }
     });
 
@@ -124,5 +147,37 @@ module.exports = class MusicBee extends EventEmitter {
 
   playernext() {
     this.#sendMessage("playernext");
+  }
+
+  playerstop() {
+    this.#sendMessage("playerstop");
+  }
+
+  playermutetoggle() {
+    this.#sendMessage("playermute", "toggle");
+  }
+
+  playermute() {
+    this.#sendMessage("playermute");
+  }
+
+  browseartists() {
+    this.#sendMessage("browseartists", { offset: 1, limit: 1 });
+  }
+
+  libraryartistalbums(artist) {
+    this.#sendMessage("libraryartistalbums", artist);
+  }
+
+  libraryalbumtracks() {
+    this.#sendMessage("libraryalbumtracks");
+  }
+
+  librarygenreartists() {
+    this.#sendMessage("librarygenreartists");
+  }
+
+  nowplayingdetails() {
+    this.#sendMessage("nowplayingdetails");
   }
 };

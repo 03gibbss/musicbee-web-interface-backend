@@ -10,6 +10,8 @@ const MUSIC_BEE_PORT = process.env.MUSIC_BEE_PORT || 3002;
 const IO_CORS_IP = process.env.IO_CORS_IP || "http://localhost";
 const IO_CORS_PORT = process.env.IO_CORS_PORT || 3000;
 
+const IO_PORT = process.env.IO_PORT || 3005;
+
 const httpServer = createServer();
 
 const io = new Server(httpServer, {
@@ -19,7 +21,7 @@ const io = new Server(httpServer, {
   },
 });
 
-httpServer.listen(3005);
+httpServer.listen(IO_PORT);
 
 let state = {
   playerstate: null,
@@ -44,6 +46,13 @@ let state = {
   },
 };
 
+let playlists = [];
+let updatingPlaylists = false;
+let playlistPlaying = "-1";
+let trackPlaying = -1;
+let playlistLength = 0;
+let trackAdjust = 1;
+
 const musicbee = new MusicBee();
 
 musicbee.connect(MUSIC_BEE_PORT, MUSIC_BEE_IP);
@@ -60,6 +69,10 @@ io.on("connect", (socket) => {
   });
 
   socket.emit("init", state);
+  socket.emit("playlistplaying", playlistPlaying);
+  socket.emit("trackplaying", trackPlaying);
+
+  musicbee.nowplayingposition();
 
   socket.on("playerplay", () => {
     musicbee.playerplay();
@@ -76,6 +89,55 @@ io.on("connect", (socket) => {
   socket.on("playernext", () => {
     musicbee.playernext();
   });
+
+  socket.on("playlistlist", () => {
+    musicbee.playlistlist();
+  });
+
+  socket.on("nowplayinglist", () => {
+    musicbee.nowplayinglist();
+  });
+
+  socket.on("updateplaylists", () => {
+    if (!updatingPlaylists) updatePlaylists();
+  });
+
+  socket.on("playerstop", () => {
+    musicbee.playerstop();
+  });
+
+  socket.on("playlistplay", (data) => {
+    updatePlaylistPlaying(data);
+    updateTrackPlayingByIndex(0);
+    musicbee.playlistplay(data);
+  });
+
+  socket.on("playlistplaybyindex", ({ url, index }) => {
+    updatePlaylistPlaying(url);
+    playlistPlayFromIndex(url, index);
+  });
+
+  socket.on("playermute", () => {
+    musicbee.playermute();
+  });
+
+  socket.on("playlistplaysmooth", (data) => {
+    updatePlaylistPlaying(data);
+    updateTrackPlayingByIndex(0);
+    playlistPlaySmooth(data);
+  });
+
+  socket.on("requestplaylists", () => {
+    socket.emit("updateplaylists", playlists);
+  });
+
+  socket.on("nowplayingdetails", () => {
+    musicbee.nowplayingdetails();
+  });
+});
+
+musicbee.on("playlistplay", () => {
+  musicbee.nowplayinglist();
 });
 
 musicbee.on("playerstatus", (data) => {
@@ -96,4 +158,144 @@ musicbee.on("nowplayingposition", (data) => {
 musicbee.on("nowplayingtrack", (data) => {
   state.nowplayingtrack = data;
   io.emit("nowplayingtrack", data);
+  updateTrackPlaying(1);
 });
+
+musicbee.on("playlistlist", (data) => {
+  io.emit("playlistlist", data);
+});
+
+musicbee.on("nowplayinglist", (data) => {
+  playlistLength = data.length;
+  io.emit("nowplayinglist", data);
+});
+
+musicbee.on("nowplayinglistchanged", () => {
+  musicbee.nowplayinglist();
+});
+
+musicbee.on("playermute", (data) => {
+  io.emit("playermute", data);
+});
+
+musicbee.on("playerprevious", () => {
+  trackAdjust = -1;
+});
+
+const updatePlaylists = async () => {
+  updatingPlaylists = true;
+  musicbee.playlistlist();
+
+  const playlistlist = await waitForEvent(musicbee, "playlistlist");
+
+  musicbee.playerstop();
+
+  await waitForEvent(musicbee, "playerstop");
+
+  musicbee.playermute();
+
+  const muteState = await waitForEvent(musicbee, "playermute");
+
+  if (!muteState) {
+    musicbee.playermutetoggle();
+    await waitForEvent(musicbee, "playermute");
+  }
+
+  let tempPlaylists = [];
+
+  for (const playlist of playlistlist) {
+    const tracks = await getPlaylistTracks(playlist);
+    tempPlaylists.push({
+      name: playlist.name,
+      url: playlist.url,
+      tracks,
+    });
+  }
+
+  if (!muteState) {
+    musicbee.playermutetoggle();
+    await waitForEvent(musicbee, "playermute");
+  }
+
+  playlists = tempPlaylists;
+
+  io.emit("updateplaylists", playlists);
+  updatingPlaylists = false;
+};
+
+const waitForEvent = (emitter, event) => {
+  return new Promise((resolve, reject) => {
+    emitter.once(event, (data) => {
+      resolve(data);
+    });
+  });
+};
+
+const getPlaylistTracks = (playlist) => {
+  return new Promise(async (resolve, reject) => {
+    musicbee.playlistplay(playlist.url);
+    await waitForEvent(musicbee, "playlistplay");
+    musicbee.playerstop();
+    await waitForEvent(musicbee, "playerstop");
+    musicbee.nowplayinglist();
+    const tracks = await waitForEvent(musicbee, "nowplayinglist");
+    resolve(tracks);
+  });
+};
+
+const playlistPlayFromIndex = async (url, index) => {
+  musicbee.playerstop();
+
+  await waitForEvent(musicbee, "playerstop");
+
+  musicbee.playermute();
+
+  const muteState = await waitForEvent(musicbee, "playermute");
+
+  if (!muteState) {
+    musicbee.playermutetoggle();
+    await waitForEvent(musicbee, "playermute");
+  }
+
+  musicbee.playlistplay(url);
+
+  await waitForEvent(musicbee, "playlistplay");
+
+  musicbee.nowplayinglistplay(index - 1);
+  updateTrackPlayingByIndex(index - 2);
+
+  if (!muteState) {
+    musicbee.playermutetoggle();
+    await waitForEvent(musicbee, "playermute");
+  }
+};
+
+const playlistPlaySmooth = async (url) => {
+  musicbee.playerstop();
+
+  await waitForEvent(musicbee, "playerstop");
+
+  musicbee.playlistplay(url);
+};
+
+const updatePlaylistPlaying = (url) => {
+  playlistPlaying = playlists.findIndex((playlist) => playlist.url === url);
+  io.emit("playlistplaying", playlistPlaying);
+};
+
+const updateTrackPlayingByIndex = (index) => {
+  trackPlaying = index;
+  io.emit("trackplaying", trackPlaying);
+};
+
+const updateTrackPlaying = () => {
+  if (trackPlaying !== 1 || trackAdjust !== -1) {
+    trackPlaying = trackPlaying + trackAdjust;
+  }
+
+  trackAdjust = 1;
+  if (trackPlaying > playlistLength) {
+    trackPlaying = 1;
+  }
+  io.emit("trackplaying", trackPlaying);
+};
