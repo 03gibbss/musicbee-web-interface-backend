@@ -16,7 +16,7 @@ module.exports = class MusicBee extends EventEmitter {
 
   connect(port, ip) {
     this.#client.connect(port, ip, () => {
-      console.log("Connected");
+      console.log("MusicBee Connected");
       this.#sendMessage("player", "custom");
     });
   }
@@ -33,7 +33,7 @@ module.exports = class MusicBee extends EventEmitter {
     this.#client.on("data", (res) => {
       try {
         const { context, data } = JSON.parse(res);
-        console.log({ context, data });
+        // console.log({ context, data });
         switch (context) {
           case "player":
             this.#sendMessage("protocol", {
